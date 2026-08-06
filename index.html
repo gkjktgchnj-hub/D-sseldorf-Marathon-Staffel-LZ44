@@ -2,7 +2,11 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LZ44 Staffel">
+<meta name="theme-color" content="#16181c">
 <title>Staffel-Cockpit 2027</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -337,6 +341,84 @@
     .ph{min-width:calc(50% - 2px);}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+
+  /* ---------- Mobil ---------- */
+  .fhint{font-size:11.5px;color:var(--steel);margin-top:4px;line-height:1.35;}
+  body{-webkit-tap-highlight-color:rgba(200,16,46,.15);-webkit-text-size-adjust:100%;}
+  button,input,select{font-family:inherit;}
+  /* iOS zoomt beim Fokus, wenn Felder kleiner als 16px sind */
+  .f input,.f select,.mepick select{font-size:16px;}
+  .f input,.f select{-webkit-appearance:none;appearance:none;border-radius:2px;}
+
+  @media (max-width:700px){
+    body{font-size:15.5px;}
+    .wrap{padding:0 14px 48px;}
+    .head-in{padding:22px 14px 20px;}
+    .limit-in,.gate-in{padding-left:14px;padding-right:14px;}
+    h1{font-size:31px;}
+    .hero .sub,.sub{font-size:13.5px;}
+
+    /* Wochenplan als Liste statt Raster */
+    .week{grid-template-columns:1fr;gap:5px;}
+    .day{flex-direction:row;min-height:0;}
+    .day-h{
+      flex:0 0 74px;border-bottom:none;border-right:1px solid var(--line);
+      flex-direction:column;justify-content:center;gap:1px;padding:9px 8px;
+    }
+    .day.today .day-h{border-right-color:var(--ink);}
+    .day-b{padding:6px;}
+    .slot{min-height:44px;align-items:center;}
+
+    /* Phasenleiste zweispaltig */
+    .phasebar{flex-wrap:wrap;gap:4px;}
+    .ph{min-width:calc(50% - 2px);}
+
+    /* Karten und Knöpfe grösser antippbar */
+    .grid{grid-template-columns:1fr;}
+    .btn{min-height:44px;padding:11px 15px;}
+    .btn.sm{min-height:38px;}
+    .mdel{min-height:40px;}
+    .del{padding:6px 10px;}
+
+    /* Dialoge als Blatt von unten */
+    .scrim{align-items:flex-end;padding:0;}
+    .modal{
+      max-width:none;border-radius:14px 14px 0 0;max-height:90vh;
+      padding-bottom:env(safe-area-inset-bottom);
+    }
+    .modal-f{position:sticky;bottom:0;background:#fff;padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+      border-top:1px solid var(--line);}
+    .modal-f .btn{flex:1;}
+    .gate{align-items:flex-end;padding:0;}
+    .gate-in{border-radius:14px 14px 0 0;padding:24px 18px calc(24px + env(safe-area-inset-bottom));max-width:none;}
+    .gate-b{min-height:56px;}
+
+    /* Typwahl einspaltig, damit die Beschriftung lesbar bleibt */
+    .typepick{grid-template-columns:1fr;}
+    .tp{min-height:48px;}
+
+    /* Log seitlich scrollbar statt gequetscht */
+    #log{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    .logtable{min-width:520px;}
+
+    .mepick{gap:8px;}
+    .weeknav{margin-left:0;width:100%;}
+    .weekfoot{gap:10px;}
+    .weekfoot .extra{margin-left:0;width:100%;}
+    .pday{flex:0 0 46px;font-size:17px;}
+  }
+
+  @media (max-width:420px){
+    h1{font-size:27px;}
+    .verdict{font-size:22px;}
+    .ticks span:nth-child(2),.ticks span:nth-child(4){display:none;}
+  }
+
+  /* Randbereiche beim iPhone im Querformat */
+  header,.limit,.wrap{
+    padding-left:max(0px,env(safe-area-inset-left));
+    padding-right:max(0px,env(safe-area-inset-right));
+  }
 </style>
 </head>
 <body>
@@ -447,7 +529,7 @@
         <div class="f"><label>Distanz km</label><input type="number" step="0.1" min="0" id="fKm" placeholder="8.5"></div>
       </div>
       <div class="row">
-        <div class="f"><label>Dauer min</label><input type="number" step="1" min="0" id="fMin" placeholder="52"></div>
+        <div class="f"><label>Dauer</label><input type="text" inputmode="numeric" id="fMin" placeholder="mm:ss" autocomplete="off"><div class="fhint">Ziffern tippen, Doppelpunkte kommen von allein</div></div>
         <div class="f"><label>Ø Puls</label><input type="number" step="1" min="0" id="fHr" placeholder="148"></div>
       </div>
       <div class="row" id="loadRow" style="display:none">
@@ -770,6 +852,28 @@ async function save(){
 
 /* ---------- Rechnen ---------- */
 const pace=s=>s.km>0&&s.min>0?(s.min*60)/s.km:null;
+const secOf=s=>s.sec||Math.round((s.min||0)*60);
+const fmtHMS=sec=>{
+  sec=Math.round(sec);
+  const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), x=sec%60;
+  return h?`${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}`
+          :`${m}:${String(x).padStart(2,'0')}`;
+};
+/* Tippt der Nutzer Ziffern, setzt sich die Zeit von rechts zusammen */
+function maskTime(el){
+  const d=el.value.replace(/\D/g,'').slice(0,6);
+  if(!d){ el.value=''; return; }
+  el.value = d.length<=2 ? d
+           : d.length<=4 ? d.slice(0,-2)+':'+d.slice(-2)
+           : d.slice(0,-4)+':'+d.slice(-4,-2)+':'+d.slice(-2);
+}
+function parseTime(v){
+  if(!v) return 0;
+  const p=v.split(':').map(x=>parseInt(x,10)||0);
+  if(p.length===1) return p[0]*60;
+  if(p.length===2) return p[0]*60+p[1];
+  return p[0]*3600+p[1]*60+p[2];
+}
 const fmtPace=p=>p==null?'—':`${Math.floor(p/60)}:${String(Math.round(p%60)).padStart(2,'0')}`;
 const fmtDur=s=>`${Math.floor(s/3600)}:${String(Math.floor(s%3600/60)).padStart(2,'0')}`;
 const sOf=id=>state.sessions.filter(s=>s.runner===id).sort((a,b)=>b.date.localeCompare(a.date));
@@ -875,7 +979,7 @@ function renderWeek(){
 
     const extra=logged.map(s=>
       `<button class="slot done" disabled><span class="tick">✓</span>
-        <span><span class="st">${s.type}</span><span class="sd">${s.km?s.km+' km':''} ${s.min?'· '+s.min+' min':''}</span></span>
+        <span><span class="st">${s.type}</span><span class="sd">${s.km?s.km+' km':''} ${s.min?'· '+fmtHMS(secOf(s)):''}</span></span>
       </button>`).join('');
 
     return `<div class="day ${isToday?'today':''}">
@@ -1098,12 +1202,14 @@ function setType(t){
   document.getElementById('loadRow').style.display=show?'grid':'none';
   document.getElementById('loadHint').style.display=show?'block':'none';
   if(t==='montur') document.getElementById('fKg').placeholder='16';
+  document.getElementById('fMin').placeholder = (t==='montur'||t==='last')?'h:mm:ss':'mm:ss';
   // Bei Kraft gibt es keine Distanz
   const kraft=(t==='kraft');
   document.getElementById('fKm').closest('.f').style.display=kraft?'none':'block';
   document.getElementById('fKm').closest('.row').style.gridTemplateColumns=kraft?'1fr':'1fr 1fr';
 }
 document.querySelectorAll('.tp').forEach(b=>b.onclick=()=>setType(b.dataset.type));
+document.getElementById('fMin').addEventListener('input',e=>maskTime(e.target));
 document.getElementById('mCancel').onclick=()=>document.getElementById('scrim').classList.remove('open');
 document.getElementById('scrim').onclick=e=>{ if(e.target.id==='scrim') e.currentTarget.classList.remove('open'); };
 document.addEventListener('keydown',e=>{
@@ -1118,11 +1224,13 @@ document.getElementById('mSave').onclick=async()=>{
     id:'s'+Date.now()+Math.random().toString(36).slice(2,6),
     runner:activeRunner, type:activeType,
     date:document.getElementById('fDate').value||new Date().toISOString().slice(0,10),
-    km:g('fKm'), min:g('fMin'), hr:g('fHr'), kg:g('fKg'), loss:g('fLoss')
+    km:g('fKm'), hr:g('fHr'), kg:g('fKg'), loss:g('fLoss')
   };
+  s.sec = parseTime(document.getElementById('fMin').value);
+  s.min = s.sec/60;
   if(activeType==='kraft'){
-    if(!s.min){ alert('Trag die Dauer in Minuten ein.'); return; }
-  }else if(!s.km||!s.min){
+    if(!s.sec){ alert('Trag die Dauer ein, zum Beispiel 25:00.'); return; }
+  }else if(!s.km||!s.sec){
     alert('Distanz und Dauer werden gebraucht, sonst lässt sich kein Tempo berechnen.'); return;
   }
   state.sessions.push(s);
@@ -1145,7 +1253,7 @@ function renderManage(){
   }
   el.innerHTML=mine.map(s=>{
     const p=pace(s);
-    const bits=[s.km?s.km+' km':null, s.min?s.min+' min':null, p?fmtPace(p)+' min/km':null,
+    const bits=[s.km?s.km+' km':null, s.min?fmtHMS(secOf(s)):null, p?fmtPace(p)+' min/km':null,
                 s.kg?s.kg+' kg':null, s.hr?s.hr+' bpm':null].filter(Boolean).join(' · ');
     return `<div class="mrow">
       <div class="mi">
