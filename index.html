@@ -236,6 +236,32 @@
   .tp.on{border-color:var(--ink);background:var(--ink);color:#fff;}
   .tp.on b{color:var(--hivis);}
 
+  .ivhead{
+    font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--ink);margin:4px 0 8px;padding-top:13px;border-top:1px solid var(--line);
+  }
+  .ivhead span{color:var(--steel);letter-spacing:.08em;}
+  .ivrow{display:grid;grid-template-columns:0.7fr 1fr 1fr;gap:9px;}
+  .ivrow .f{margin-bottom:8px;}
+  #ivCalc.hit{color:var(--signal);font-weight:500;}
+
+  .adminbar{
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+    padding:0 0 13px;margin-bottom:11px;border-bottom:1px solid var(--line);
+  }
+  .adminbar .who{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel);flex:1;}
+  .mrow .mwho{
+    font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--signal);
+  }
+  .medit{
+    border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;
+    font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    padding:6px 10px;border-radius:2px;flex:0 0 auto;
+  }
+  .medit:hover{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .medit:focus-visible{outline:3px solid var(--hivis);outline-offset:2px;}
+
   /* ---------- Verwaltung ---------- */
   .mrow{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid #e8eaec;}
   .mrow:last-child{border-bottom:none;}
@@ -414,6 +440,7 @@
 
     /* Typwahl einspaltig, damit die Beschriftung lesbar bleibt */
     .typepick{grid-template-columns:1fr;}
+    .ivrow{grid-template-columns:1fr 1fr;}
     .tp{min-height:48px;}
 
     /* Log seitlich scrollbar statt gequetscht */
@@ -561,6 +588,21 @@
         <div class="f"><label>Gewichtsverlust kg</label><input type="number" step="0.1" min="0" id="fLoss" placeholder="1.2"></div>
       </div>
       <p class="hint" id="loadHint" style="display:none">Vor und nach der Einheit wiegen. Über 2 % Körpergewicht heißt: zu wenig getrunken.</p>
+
+      <div id="ivBlock" style="display:none">
+        <div class="ivhead">Intervalle <span>optional</span></div>
+        <div class="ivrow">
+          <div class="f"><label>Anzahl</label><input type="number" step="1" min="0" id="fIvReps" placeholder="5"></div>
+          <div class="f"><label>je Meter</label><input type="number" step="10" min="0" id="fIvDist" placeholder="1000"></div>
+          <div class="f"><label>Zeit je Stück</label><input type="text" inputmode="numeric" id="fIvTime" placeholder="mm:ss" autocomplete="off"></div>
+        </div>
+        <p class="hint" id="ivCalc">Nur die schnellen Abschnitte, ohne Ein- und Auslaufen. Gesamtdistanz und Gesamtdauer darfst du dann leer lassen.</p>
+      </div>
+
+      <div class="f" id="adminRunnerRow" style="display:none">
+        <label>Läufer</label>
+        <select id="fRunner"></select>
+      </div>
     </div>
     <div class="modal-f">
       <button class="btn ghost" id="mCancel">Abbrechen</button>
@@ -614,6 +656,9 @@ const storage = {
   }
 };
 
+/* Admin-Code: wer ihn kennt, darf alle Einträge bearbeiten. Frei änderbar. */
+const ADMIN_CODE = "LZ44-2027";
+
 const KEY='staffel2027';
 const RACE=new Date('2027-04-18T10:15:00');
 const LIMIT_MIN=345;              // 10:15 -> 16:00
@@ -650,7 +695,9 @@ function profile(id){
   const r8=since(56), r28=since(28), r21=since(21);
 
   // Referenztempo: schnellster Lauf ab 3 km der letzten 8 Wochen
-  const cand=r8.filter(s=>s.km>=3).map(pace).filter(Boolean);
+  // Reine Intervalleinheiten mit kurzen Stücken taugen nicht als Referenz
+  const cand=r8.filter(s=>s.km>=3 && !(s.ivOnly && s.iv && s.iv.dist<800))
+               .map(pace).filter(Boolean);
   const ref=cand.length?Math.min(...cand):null;
 
   // Wochenumfang und Frequenz der letzten drei Wochen
@@ -817,6 +864,7 @@ function buildWeek(id){
 
 let state=null, me=null, activeRunner=null, activeType='locker', activeDate=null;
 let weekOffset=0;   // 0 = laufende Woche, negativ = zurück
+let isAdmin=false, editId=null, manageAll=false;
 
 /* ---------- Speicher ---------- */
 async function load(){
@@ -842,6 +890,10 @@ async function load(){
     const m=await storage.get(KEY+'-me',false);
     me=m&&m.value?m.value:null;
   }catch(e){ me=null; }
+  try{
+    const a=await storage.get(KEY+'-admin',false);
+    isAdmin = !!(a&&a.value==='1');
+  }catch(e){ isAdmin=false; }
   if(!me||!state.runners.some(r=>r.id===me)){ me=null; showGate(); }
   render();
 }
@@ -1232,14 +1284,44 @@ function renderLog(){
 }
 
 /* ---------- Dialog ---------- */
-function openModal(id,type,date,kg){
-  activeRunner=id;
+function openModal(id,type,date,kg,edit){
+  activeRunner=id; editId = edit ? edit.id : null;
   const r=state.runners.find(x=>x.id===id);
-  document.getElementById('mWho').textContent=`Etappe ${r.etappe} · ${r.name}`;
-  document.getElementById('fDate').value=date||iso(new Date());
-  ['fKm','fMin','fHr','fKg','fLoss'].forEach(f=>document.getElementById(f).value='');
-  setType(type||'locker');
-  if(kg) document.getElementById('fKg').value=kg;
+  document.getElementById('mWho').textContent = edit
+    ? 'Eintrag ändern' : `Etappe ${r.etappe} · ${r.name}`;
+  document.getElementById('mTitle').textContent = edit ? 'Einheit bearbeiten' : 'Einheit eintragen';
+  document.getElementById('mSave').textContent = edit ? 'Speichern' : 'Eintragen';
+
+  ['fKm','fMin','fHr','fKg','fLoss','fIvReps','fIvDist','fIvTime'].forEach(f=>document.getElementById(f).value='');
+  document.getElementById('fDate').value = edit ? edit.date : (date||iso(new Date()));
+  setType(edit ? edit.type : (type||'locker'));
+
+  if(edit){
+    if(!edit.ivOnly && edit.km) document.getElementById('fKm').value=edit.km;
+    if(edit.sec||edit.min) document.getElementById('fMin').value=fmtHMS(secOf(edit));
+    if(edit.hr) document.getElementById('fHr').value=edit.hr;
+    if(edit.kg) document.getElementById('fKg').value=edit.kg;
+    if(edit.loss) document.getElementById('fLoss').value=edit.loss;
+    if(edit.iv){
+      document.getElementById('fIvReps').value=edit.iv.reps;
+      document.getElementById('fIvDist').value=edit.iv.dist;
+      document.getElementById('fIvTime').value=fmtHMS(edit.iv.sec);
+    }
+    ivPreview();
+  }else if(kg){
+    document.getElementById('fKg').value=kg;
+  }
+
+  // Läuferwechsel nur im Admin-Modus
+  const ar=document.getElementById('adminRunnerRow');
+  if(isAdmin && edit){
+    ar.style.display='block';
+    document.getElementById('fRunner').innerHTML=state.runners.map(x=>
+      `<option value="${x.id}" ${x.id===(edit.runner||id)?'selected':''}>${esc(x.name)}</option>`).join('');
+  }else{
+    ar.style.display='none';
+  }
+
   document.getElementById('scrim').classList.add('open');
   document.getElementById('fKm').focus();
 }
@@ -1251,6 +1333,10 @@ function setType(t){
   document.getElementById('loadHint').style.display=show?'block':'none';
   if(t==='montur') document.getElementById('fKg').placeholder='16';
   document.getElementById('fMin').placeholder = (t==='montur'||t==='last')?'h:mm:ss':'mm:ss';
+  const iv = (t==='tempo'||t==='montur');
+  document.getElementById('ivBlock').style.display = iv?'block':'none';
+  if(!iv){ ['fIvReps','fIvDist','fIvTime'].forEach(f=>document.getElementById(f).value=''); }
+  ivPreview();
   // Bei Kraft gibt es keine Distanz
   const kraft=(t==='kraft');
   document.getElementById('fKm').closest('.f').style.display=kraft?'none':'block';
@@ -1268,49 +1354,137 @@ document.addEventListener('keydown',e=>{
 
 document.getElementById('mSave').onclick=async()=>{
   const g=id=>parseFloat(document.getElementById(id).value)||0;
+  const iv=ivValues();
+  const runner = (isAdmin && document.getElementById('adminRunnerRow').style.display!=='none')
+    ? document.getElementById('fRunner').value : activeRunner;
+
   const s={
-    id:'s'+Date.now()+Math.random().toString(36).slice(2,6),
-    runner:activeRunner, type:activeType,
-    date:document.getElementById('fDate').value||new Date().toISOString().slice(0,10),
+    id: editId || 's'+Date.now()+Math.random().toString(36).slice(2,6),
+    runner, type:activeType,
+    date:document.getElementById('fDate').value||iso(new Date()),
     km:g('fKm'), hr:g('fHr'), kg:g('fKg'), loss:g('fLoss')
   };
   s.sec = parseTime(document.getElementById('fMin').value);
+
+  // Fehlen Gesamtwerte, werden sie aus den Intervallen abgeleitet
+  if(iv){
+    s.iv = iv;
+    if(!s.km)  s.km  = +(iv.reps*iv.dist/1000).toFixed(2);
+    if(!s.sec) s.sec = iv.reps*iv.sec;
+    s.ivOnly = !g('fKm');
+  }
   s.min = s.sec/60;
+
   if(activeType==='kraft'){
     if(!s.sec){ alert('Trag die Dauer ein, zum Beispiel 25:00.'); return; }
   }else if(!s.km||!s.sec){
-    alert('Distanz und Dauer werden gebraucht, sonst lässt sich kein Tempo berechnen.'); return;
+    alert('Distanz und Dauer werden gebraucht. Bei Intervallen reicht auch der Intervallblock allein.'); return;
   }
-  state.sessions.push(s);
+
+  if(editId){
+    const i=state.sessions.findIndex(x=>x.id===editId);
+    if(i>-1) state.sessions[i]=s; else state.sessions.push(s);
+  }else{
+    state.sessions.push(s);
+  }
+  editId=null;
   await save();
   document.getElementById('scrim').classList.remove('open');
   render();
+  if(document.getElementById('manageScrim').classList.contains('open')) renderManage();
 };
 
+
+/* ---------- Intervalle ---------- */
+function ivValues(){
+  const reps=parseInt(document.getElementById('fIvReps').value,10)||0;
+  const dist=parseFloat(document.getElementById('fIvDist').value)||0;
+  const sec=parseTime(document.getElementById('fIvTime').value);
+  return (reps&&dist&&sec) ? {reps,dist,sec} : null;
+}
+function ivPreview(){
+  const el=document.getElementById('ivCalc');
+  if(!el) return;
+  const v=ivValues();
+  if(!v){
+    el.className='hint';
+    el.textContent='Nur die schnellen Abschnitte, ohne Ein- und Auslaufen. Gesamtdistanz und Gesamtdauer darfst du dann leer lassen.';
+    return;
+  }
+  const km=v.reps*v.dist/1000;
+  const p=v.sec/(v.dist/1000);
+  el.className='hint hit';
+  el.textContent=`${v.reps} × ${v.dist} m in je ${fmtHMS(v.sec)} — zusammen ${km.toFixed(2)} km bei ${fmtPace(p)} min/km`;
+}
+['fIvReps','fIvDist','fIvTime'].forEach(id=>{
+  const el=document.getElementById(id);
+  el.addEventListener('input',e=>{ if(id==='fIvTime') maskTime(e.target); ivPreview(); });
+});
 
 /* ---------- Trainingssätze verwalten ---------- */
 function renderManage(){
   const meId = me || state.runners[0].id;
   const r=state.runners.find(x=>x.id===meId);
-  document.getElementById('gWho').textContent=`${r.name} · Etappe ${r.etappe}`;
-  const mine=sOf(meId);
+  const showAll = isAdmin && manageAll;
+  document.getElementById('gWho').textContent = showAll
+    ? 'Admin · alle Läufer' : `${r.name} · Etappe ${r.etappe}`;
+
+  const list = showAll
+    ? [...state.sessions].sort((a,b)=>b.date.localeCompare(a.date))
+    : sOf(meId);
+
   const el=document.getElementById('manageBody');
-  if(!mine.length){
-    el.innerHTML='<div class="empty">Du hast noch keine Einheiten eingetragen.</div>';
-    return;
+
+  const bar = isAdmin
+    ? `<div class="adminbar">
+         <span class="who">${showAll?'Du siehst alle Einträge des Teams.':'Du siehst nur deine eigenen.'}</span>
+         <button class="medit" id="gToggleAll">${showAll?'Nur meine':'Alle anzeigen'}</button>
+       </div>`
+    : `<div class="adminbar">
+         <span class="who">Nur deine eigenen Einträge.</span>
+         <button class="medit" id="gAdmin">Admin</button>
+       </div>`;
+
+  if(!list.length){
+    el.innerHTML=bar+'<div class="empty">Keine Einheiten vorhanden.</div>';
+  }else{
+    el.innerHTML=bar+list.map(s=>{
+      const p=pace(s);
+      const own=state.runners.find(x=>x.id===s.runner);
+      const bits=[s.km?s.km+' km':null, s.min?fmtHMS(secOf(s)):null, p?fmtPace(p)+' min/km':null,
+                  s.iv?`${s.iv.reps}×${s.iv.dist} m`:null,
+                  s.kg?s.kg+' kg':null, s.hr?s.hr+' bpm':null].filter(Boolean).join(' · ');
+      return `<div class="mrow">
+        <div class="mi">
+          <div class="md">${fmtDate(s.date)} &nbsp; ${s.type}
+            ${showAll?`<span class="mwho">${esc(own?own.name.split(' ')[0]:'?')}</span>`:''}</div>
+          <div class="ms">${bits||'ohne Werte'}</div>
+        </div>
+        ${(showAll||s.runner===meId)?`<button class="medit" data-medit="${s.id}">Ändern</button>`:''}
+        <button class="mdel" data-mdel="${s.id}">Löschen</button>
+      </div>`;
+    }).join('');
   }
-  el.innerHTML=mine.map(s=>{
-    const p=pace(s);
-    const bits=[s.km?s.km+' km':null, s.min?fmtHMS(secOf(s)):null, p?fmtPace(p)+' min/km':null,
-                s.kg?s.kg+' kg':null, s.hr?s.hr+' bpm':null].filter(Boolean).join(' · ');
-    return `<div class="mrow">
-      <div class="mi">
-        <div class="md">${fmtDate(s.date)} &nbsp; ${s.type}</div>
-        <div class="ms">${bits||'ohne Werte'}</div>
-      </div>
-      <button class="mdel" data-mdel="${s.id}">Löschen</button>
-    </div>`;
-  }).join('');
+
+  const tg=document.getElementById('gToggleAll');
+  if(tg) tg.onclick=()=>{ manageAll=!manageAll; renderManage(); };
+
+  const ad=document.getElementById('gAdmin');
+  if(ad) ad.onclick=async()=>{
+    const code=prompt('Admin-Code eingeben:');
+    if(code===null) return;
+    if(code.trim()!==ADMIN_CODE){ alert('Code stimmt nicht.'); return; }
+    isAdmin=true; manageAll=true;
+    try{ await storage.set(KEY+'-admin','1',false); }catch(e){}
+    renderManage();
+  };
+
+  el.querySelectorAll('[data-medit]').forEach(b=>{
+    b.onclick=()=>{
+      const s=state.sessions.find(x=>x.id===b.dataset.medit);
+      if(s) openModal(s.runner,s.type,s.date,s.kg,s);
+    };
+  });
 
   el.querySelectorAll('[data-mdel]').forEach(b=>{
     b.onclick=async()=>{
@@ -1325,6 +1499,14 @@ function renderManage(){
     };
   });
 }
+document.getElementById('manageBtn').onclick=()=>{
+  renderManage();
+  document.getElementById('manageScrim').classList.add('open');
+};
+document.getElementById('gClose').onclick=()=>document.getElementById('manageScrim').classList.remove('open');
+document.getElementById('manageScrim').onclick=e=>{ if(e.target.id==='manageScrim') e.currentTarget.classList.remove('open'); };
+
+
 document.getElementById('wPrev').onclick=()=>{ weekOffset--; renderWeek(); };
 document.getElementById('wNext').onclick=()=>{ if(weekOffset<0){ weekOffset++; renderWeek(); } };
 document.getElementById('wToday').onclick=()=>{ weekOffset=0; renderWeek(); };
